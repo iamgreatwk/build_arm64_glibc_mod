@@ -1,0 +1,17 @@
+# 编译产物 / 设备部署包（由 CI Artifacts 分发，不入库）
+*.tar.gz
+*.tgz
+
+# 本地密钥 / 设备配置
+*.key
+*.pem
+ent.conf
+wpa_supplicant.conf
+
+# 编辑器 / OS
+.idea/
+.vscode/
+.DS_Store
+
+# 打包交付物（用 CI Artifacts 分发）
+*.zip
