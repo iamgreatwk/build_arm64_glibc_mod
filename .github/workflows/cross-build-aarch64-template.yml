@@ -1,0 +1,77 @@
+# 通用 aarch64 交叉编译工作流模板
+# 用法：复制本文件 → 改名 build-<你的包>-aarch64-glibc.yml → 改 SOURCE_URL / 配置 / 安装步骤 / 产物名
+# 适用：任何 C/Makefile/autotools/cmake 包（hostapd、iw、dropbear、tcpdump ...）
+name: Cross-build <PKG> (aarch64/ARM64, glibc)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pkg_version:
+        description: '包版本'
+        required: false
+        default: '1.0'
+
+jobs:
+  cross-build-aarch64:
+    runs-on: ubuntu-22.04
+    env:
+      PKG: <PKG>                                                   # 包名，用于产物命名
+      PKG_VER: ${{ github.event.inputs.pkg_version || '1.0' }}
+      SOURCE_URL: https://example.com/<PKG>-${PKG_VER}.tar.gz        # ← 改成真实源码地址
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装交叉工具链与 arm64 开发库（按包需要增减）
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            pkg-config make bc ca-certificates \
+            libssl-dev:arm64            # ← 按包依赖增删 arm64 的 -dev 包
+
+      - name: 下载并解压源码
+        run: |
+          wget -q "$SOURCE_URL" -O src.tar.gz
+          tar xzf src.tar.gz
+          # 若顶层目录名不确定：tar xzf src.tar.gz --one-top-level=src
+
+      - name: 配置 + 交叉编译（按包替换 configure/cmake/make 步骤）
+        env:
+          CC: aarch64-linux-gnu-gcc
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
+          PKG_CONFIG_SYSROOT_DIR: /
+        run: |
+          cd "<源码目录>"
+          ./configure --host=aarch64-linux-gnu --prefix=/usr     # autotools 包
+          # 或 cmake -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_INSTALL_PREFIX=/usr ..
+          make -j"$(nproc)"
+          aarch64-linux-gnu-strip <产出二进制>
+
+      - name: 安全检查（禁止 systemd/dbus 等宿主依赖泄漏）
+        run: |
+          for b in <产出二进制路径>; do
+            echo "== $b =="
+            readelf -d "$b" | grep -i needed
+            if readelf -d "$b" | grep -qiE "libdbus|libsystemd|libpcsclite"; then
+              echo "❌ 泄漏宿主依赖，终止"; exit 1
+            fi
+          done
+
+      - name: 打包（无顶层目录）+ 唯一命名上传
+        run: |
+          PKGROOT="$PWD/pkgroot"
+          rm -rf "$PKGROOT" && mkdir -p "$PKGROOT/usr/bin" "$PKGROOT/usr/lib"
+          cp -a <产出二进制> "$PKGROOT/usr/bin/"
+          # 仅复制运行时真正需要的 .so（用 ldd / readelf -d 确认）
+          # cp -aL /usr/lib/aarch64-linux-gnu/libxxx.so.* "$PKGROOT/usr/lib/"
+          ART="${PKG}-${PKG_VER}-aarch64-glibc-${{ github.run_number }}.tar.gz"
+          tar czpf "$ART" -C "$PKGROOT" usr
+          echo "ARTIFACT=$ART" >> "$GITHUB_ENV"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}
