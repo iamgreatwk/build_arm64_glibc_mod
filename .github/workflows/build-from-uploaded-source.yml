@@ -1,0 +1,64 @@
+name: Build from uploaded source (aarch64/ARM64, glibc)
+
+on:
+  workflow_dispatch:
+    inputs:
+      src_file:
+        description: '源码文件路径（仓库内 src/ 下，如 src/dropbear-2022.83.tar.gz）'
+        required: true
+      build_command:
+        description: '交叉编译命令（工作目录=解压后的源码根；$PKGROOT 指向打包根目录，把产物拷进去即可）'
+        required: true
+        default: 'make CC=aarch64-linux-gnu-gcc -j$(nproc) && mkdir -p $PKGROOT/usr/bin && cp $(ls | grep -vE "Makefile|README|*.c|*.h" | head -1) $PKGROOT/usr/bin/ 2>/dev/null || true'
+      artifact_prefix:
+        description: '产物命名前缀（防撞名，自动加 run#）'
+        required: false
+        default: 'out'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 aarch64 交叉工具链
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            pkg-config make bc ca-certificates
+
+      - name: 解压源码
+        run: |
+          f="${{ github.event.inputs.src_file }}"
+          echo "源文件: $f"
+          mkdir -p work
+          tar xzf "$f" -C work
+          SRC=$(ls work/ | head -1)
+          echo "源码目录: work/$SRC"
+          echo "SRC_DIR=work/$SRC" >> "$GITHUB_ENV"
+
+      - name: 交叉编译
+        working-directory: ${{ env.SRC_DIR }}
+        env:
+          CC: aarch64-linux-gnu-gcc
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
+          PKG_CONFIG_SYSROOT_DIR: /
+          PKGROOT: ${{ github.workspace }}/pkgroot
+        run: |
+          mkdir -p "$PKGROOT"
+          ${{ github.event.inputs.build_command }}
+
+      - name: 打包产物（无顶层目录前缀）
+        run: |
+          ART="${{ github.event.inputs.artifact_prefix }}-${{ github.run_number }}.tar.gz"
+          tar czf "$ART" -C pkgroot .
+          echo "产物: $ART"
+          tar tzf "$ART"
+          echo "ARTIFACT=$ART" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}
