@@ -66,7 +66,7 @@
 | 重新 tftp 仍跑旧行为 | server 上同名旧文件 | 每次产物强制唯一命名 |
 | 连到错误 SSID | `update_config=1` 把别的网络写回 conf | conf 设 `update_config=0`，只留目标网络 |
 
-## 设备端 EAP 连接示例（JNU-Secure / PEAP-MSCHAPv2）
+## 设备端 EAP 连接示例（AAA / PEAP-MSCHAPv2）
 
 ```ini
 # /tmp/ent.conf
@@ -74,7 +74,7 @@ ctrl_interface=/var/run/wpa_supplicant
 ctrl_interface_group=0
 update_config=0
 network={
-  ssid="JNU-Secure"
+  ssid="AAA"
   key_mgmt=WPA-EAP
   eap=PEAP
   identity="你的账号"
