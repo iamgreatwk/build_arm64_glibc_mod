@@ -49,16 +49,32 @@ applies to hostapd, iw, dropbear, tcpdump, etc.
    (libdbus / libsystemd / libpcsclite) before uploading.
 
 ## URL 模式 workflow（2026-08-18 新增，实测通过 ✅）
-仓库已有 3 个 workflow：
+仓库已有 4 个 workflow：
 - **`cross-build-from-url.yml`（推荐，通用）**：Actions → Run workflow → 填
   `source_url`（源码下载地址）+ `build_command`（交叉编译命令，$PKGROOT 指向打包根）+
   `artifact_prefix` → 自动下载/解压/编译/打包/上传 artifact。**实测**：busybox-1.36.1
-  编译成功，产物 64-bit AARCH64（usr/ 结构无前缀）。
+  编译成功，产物 64-bit AARCH64（usr/ 结构无前缀）；hello.c 端到端 ~60 秒。
 - `build-wpa_supplicant-aarch64-glibc.yml`：wpa 专用（URL 写死 w1.fi + EAP 配置）
 - `build-from-uploaded-source.yml`：本机已下载源码（上传仓库 src/ 再编）
-- 配套本地脚本 `ghbuild.js`：全程 api.github.com（github.com 直连不通的网络可用），
-  `GITHUB_TOKEN=xxx node ghbuild.js <本地源码.tar.gz> <src_file> "<build_command>" [prefix]`
-- **坑**：源码 URL 要现验（dropbear 旧版本 2022.83 官网已 404，用 busybox.net 稳定源测试）
+- `cross-build-aarch64-template.yml`：通用模板（复制改名）
+
+## ghbuild 一键命令（2026-08-18 实测通过 ✅，PC/手机通用）
+**`ghbuild.js`（node>=18 零依赖，全程 api.github.com）**，仓库根 + 设备 `/usr/bin/ghbuild`：
+```
+ghbuild url <源码URL> "<build_command>" [prefix]   一键：触发→轮询→下载→解zip→验证ELF
+ghbuild poll                                       最近 5 次状态
+ghbuild dl [run_id]                                下载产物（默认最新）
+```
+- Token：环境变量 `GH_TOKEN`/`GITHUB_TOKEN`，或 `~/.gh_token` 文件（`echo 'ghp_xxx' > ~/.gh_token && chmod 600`）
+- 实测示例（busybox）：
+  ```
+  ghbuild url https://busybox.net/downloads/busybox-1.36.1.tar.bz2 \
+    "make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 && mkdir -p \$PKGROOT/usr/bin && cp busybox \$PKGROOT/usr/bin/" busybox
+  ```
+- 产物命名自动带 run#（`<prefix>-<run#>.tar.gz`），不会撞缓存；解压到设备 `tar -xzf ... -C /`
+- **坑 1**：源码 URL 要现验（dropbear 旧版本 2022.83 官网已 404，busybox.net 稳定）
+- **坑 2**：GitHub workflow_dispatch POST 返回 **204 空 body**——API 封装若 `r.json()` 会
+  `Unexpected end of JSON input`，要先 `r.text()` 再判空（ghbuild.js 已处理）
 
 
 ## The D-Bus → libsystemd trap (most common failure)
