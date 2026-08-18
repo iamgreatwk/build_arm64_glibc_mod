@@ -7,9 +7,7 @@ on:
         description: 'wpa_supplicant 版本'
         required: false
         default: '2.10'
-  push:
-    paths:
-      - '.github/workflows/build-wpa_supplicant-aarch64-glibc.yml'
+  # 纯手动触发：禁止 push 自动编译（2026-08-18，防浪费 Actions 资源）
 
 jobs:
   build-wpa_supplicant-aarch64:
