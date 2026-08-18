@@ -21,6 +21,17 @@ applies to hostapd, iw, dropbear, tcpdump, etc.
    `libnl-route-3-dev:arm64`, `libnl-genl-3-dev:arm64`).
    - arm64 packages live in `ubuntu-ports`, NOT `ubuntu`, on GitHub-hosted runners.
      Use `mirrors.aliyun.com/ubuntu-ports` if the default archive is unreachable.
+   - **apt 源完整配置（2026-08-18 三次踩坑实锤）**：只 `dpkg --add-architecture arm64`
+     后 apt update，默认源(azure.archive/security.ubuntu.com)被要求提供 arm64 索引 → 404；
+     若把 ports 源加进来但不动默认源，默认源仍 404；若粗暴 sed 全部加 [arch=amd64]，
+     microsoft-prod.list 等**已有 [arch=]** 的第三方源被搞坏 → Malformed entry。
+     **正确写法**（只改 sources.list、跳过已有 [arch=] 行）：
+     ```
+     sudo dpkg --add-architecture arm64
+     sudo sed -i '/\[arch=/!s/^deb /deb [arch=amd64] /' /etc/apt/sources.list 2>/dev/null || true
+     echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main universe multiverse restricted" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+     sudo apt-get update
+     ```
    - Prefer `ubuntu-22.04` (glibc 2.35) over 24.04 for broader device compatibility.
    - Source is fetched at build time (`wget` from upstream), so the repo can be empty.
 2. Cross env: `CC=aarch64-linux-gnu-gcc`,
@@ -36,6 +47,19 @@ applies to hostapd, iw, dropbear, tcpdump, etc.
    can never serve an old copy.
 7. Add a verification step: `readelf -d <bin>` must NOT list forbidden libs
    (libdbus / libsystemd / libpcsclite) before uploading.
+
+## URL 模式 workflow（2026-08-18 新增，实测通过 ✅）
+仓库已有 3 个 workflow：
+- **`cross-build-from-url.yml`（推荐，通用）**：Actions → Run workflow → 填
+  `source_url`（源码下载地址）+ `build_command`（交叉编译命令，$PKGROOT 指向打包根）+
+  `artifact_prefix` → 自动下载/解压/编译/打包/上传 artifact。**实测**：busybox-1.36.1
+  编译成功，产物 64-bit AARCH64（usr/ 结构无前缀）。
+- `build-wpa_supplicant-aarch64-glibc.yml`：wpa 专用（URL 写死 w1.fi + EAP 配置）
+- `build-from-uploaded-source.yml`：本机已下载源码（上传仓库 src/ 再编）
+- 配套本地脚本 `ghbuild.js`：全程 api.github.com（github.com 直连不通的网络可用），
+  `GITHUB_TOKEN=xxx node ghbuild.js <本地源码.tar.gz> <src_file> "<build_command>" [prefix]`
+- **坑**：源码 URL 要现验（dropbear 旧版本 2022.83 官网已 404，用 busybox.net 稳定源测试）
+
 
 ## The D-Bus → libsystemd trap (most common failure)
 wpa_supplicant's defconfig enables `CONFIG_CTRL_IFACE_DBUS_NEW`. That pulls in
