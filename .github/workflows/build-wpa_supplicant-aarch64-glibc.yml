@@ -1,0 +1,74 @@
+name: Build wpa_supplicant (aarch64/ARM64, glibc, no D-Bus/systemd)
+
+on:
+  workflow_dispatch:
+    inputs:
+      wpa_version:
+        description: 'wpa_supplicant 版本'
+        required: false
+        default: '2.10'
+  push:
+    paths:
+      - '.github/workflows/build-wpa_supplicant-aarch64-glibc.yml'
+
+jobs:
+  build-wpa_supplicant-aarch64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装交叉工具链与 arm64 开发库
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libnl-route-3-dev:arm64 libnl-genl-3-dev:arm64 \
+            libssl-dev:arm64 pkg-config make bc ca-certificates
+      - name: 下载源码
+        run: |
+          VER="${{ github.event.inputs.wpa_version || '2.10' }}"
+          wget -q "https://w1.fi/releases/wpa_supplicant-${VER}.tar.gz" -O wpa.tar.gz
+          tar xzf wpa.tar.gz
+          echo "WPA_DIR=wpa_supplicant-${VER}" >> "$GITHUB_ENV"
+      - name: 生成 .config（禁用 D-Bus/PCSC，启用 libnl32+OpenSSL+EAP）
+        working-directory: ${{ env.WPA_DIR }}/wpa_supplicant
+        run: |
+          cp defconfig .config
+          sed -i 's/^#CONFIG_LIBNL32=y/CONFIG_LIBNL32=y/' .config
+          sed -i 's/^CONFIG_CTRL_IFACE_DBUS=y/#CONFIG_CTRL_IFACE_DBUS=y/' .config
+          sed -i 's/^CONFIG_CTRL_IFACE_DBUS_NEW=y/#CONFIG_CTRL_IFACE_DBUS_NEW=y/' .config
+          sed -i 's/^CONFIG_CTRL_IFACE_DBUS_INTRO=y/#CONFIG_CTRL_IFACE_DBUS_INTRO=y/' .config
+          sed -i 's/^CONFIG_PCSC=y/#CONFIG_PCSC=y/' .config
+          grep -nE "LIBNL32|CTRL_IFACE_DBUS|PCSC" .config
+      - name: 交叉编译
+        working-directory: ${{ env.WPA_DIR }}/wpa_supplicant
+        env:
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
+          PKG_CONFIG_SYSROOT_DIR: /
+        run: |
+          make CC=aarch64-linux-gnu-gcc -j"$(nproc)"
+          aarch64-linux-gnu-strip wpa_supplicant wpa_cli wpa_passphrase
+      - name: 安全检查（禁止 libdbus/libsystemd/libpcsclite）
+        working-directory: ${{ env.WPA_DIR }}/wpa_supplicant
+        run: |
+          readelf -d wpa_supplicant | grep -i needed
+          if readelf -d wpa_supplicant | grep -qiE "libdbus|libsystemd|libpcsclite"; then
+            echo "❌ 仍依赖 systemd 相关库，构建终止"; exit 1
+          fi
+      - name: 打包（无顶层目录）+ 唯一命名上传
+        run: |
+          VER="${{ github.event.inputs.wpa_version || '2.10' }}"
+          PKGROOT="$PWD/pkgroot"
+          rm -rf "$PKGROOT" && mkdir -p "$PKGROOT/usr/sbin" "$PKGROOT/usr/lib"
+          cp -a "$WPA_DIR/wpa_supplicant/wpa_supplicant" "$WPA_DIR/wpa_supplicant/wpa_cli" "$PKGROOT/usr/sbin/"
+          for lib in libnl-3.so.200 libnl-genl-3.so.200 libnl-route-3.so.200 libssl.so.3 libcrypto.so.3; do
+            cp -aL "/usr/lib/aarch64-linux-gnu/$lib" "$PKGROOT/usr/lib/"
+          done
+          ART="wpa_supplicant-${VER}-aarch64-glibc-nosystemd-${{ github.run_number }}.tar.gz"
+          tar czpf "$ART" -C "$PKGROOT" usr
+          echo "ARTIFACT=$ART" >> "$GITHUB_ENV"
+          tar tzf "$ART"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}
