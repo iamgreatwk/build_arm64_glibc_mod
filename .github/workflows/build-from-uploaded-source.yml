@@ -24,7 +24,8 @@ jobs:
       - name: 安装 aarch64 交叉工具链
         run: |
           sudo dpkg --add-architecture arm64
-          # GitHub runner 默认 ubuntu 源缺 arm64 索引 → 加 ubuntu-ports 源
+          # 默认源仅 amd64（避免 arm64 索引 404），arm64 走 ubuntu-ports；只改 sources.list、跳过已有 [arch=] 行（第三方 .list.d 不动）
+          sudo sed -i '/\[arch=/!s/^deb /deb [arch=amd64] /' /etc/apt/sources.list 2>/dev/null || true
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main universe multiverse restricted" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
